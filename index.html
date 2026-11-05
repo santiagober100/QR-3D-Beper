@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0f17">
+<title>QR interactivo Beper</title>
+<style>
+:root{--bg:#0b0f17;--panel:#121826;--panel2:#0d1320;--line:#243350;--txt:#e9effc;--mut:#94a5c4;--acc:#39d98a;--acc2:#4aa8ff;--r:14px}
+body.light{--bg:#efe7d7;--panel:#fbf6ec;--panel2:#f3ebdb;--line:#d9ccb4;--txt:#2b2620;--mut:#6d6455;--acc:#1f7a4d;--acc2:#b8395f}
+*{box-sizing:border-box}html,body{margin:0}
+body{background:var(--bg);color:var(--txt);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Ubuntu,sans-serif;transition:background .3s,color .3s}
+body:not(.light){background:radial-gradient(1100px 600px at 15% -10%,#17223c 0%,var(--bg) 60%) fixed}
+body.light{background:radial-gradient(1100px 600px at 20% -10%,#f8f2e4 0%,var(--bg) 60%) fixed}
+.wrap{max-width:1180px;margin:0 auto;padding:14px 14px 30px}
+header{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;padding:8px 4px 12px}
+h1{margin:0;font-size:clamp(20px,4vw,30px)}
+h1 span{background:linear-gradient(90deg,var(--acc),var(--acc2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{margin:4px 0 0;color:var(--mut);font-size:13.5px;max-width:70ch}
+#btnTheme{white-space:nowrap}
+.tabs{display:flex;gap:8px;margin:10px 0}
+.tab{flex:1;padding:12px;font-weight:600}
+.tab.active{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 16%,var(--panel))}
+.card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:var(--r);padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.18)}
+.canvasBox{position:relative;width:min(100%,72vh);aspect-ratio:1;margin:0 auto;border-radius:12px;overflow:hidden;border:1px solid var(--line);touch-action:none}
+canvas#cv{display:block;width:100%;height:100%;cursor:grab}
+canvas#cv:active{cursor:grabbing}
+.badge{position:absolute;left:10px;top:10px;padding:5px 10px;border-radius:999px;background:color-mix(in srgb,var(--panel) 72%,transparent);border:1px solid var(--line);font-size:12px;color:var(--mut);backdrop-filter:blur(6px)}
+.viewRow{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.viewRow .grow{flex:1;min-width:160px}
+button{font:inherit;color:var(--txt);background:color-mix(in srgb,var(--panel) 60%,var(--line));border:1px solid var(--line);border-radius:10px;padding:11px 12px;cursor:pointer;transition:.15s}
+button:hover{border-color:var(--acc)}
+button.primary{background:linear-gradient(135deg,color-mix(in srgb,var(--acc) 30%,var(--panel)),color-mix(in srgb,var(--acc2) 25%,var(--panel)));border-color:var(--acc);font-weight:600}
+.hint{color:var(--mut);font-size:12px;text-align:center;margin:8px 0 2px}
+.dlRow{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:10px}
+h3{margin:0 0 8px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut)}
+.sec{padding:12px 0;border-top:1px dashed var(--line)}
+.sec:first-child{border-top:0;padding-top:2px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row+.row{margin-top:8px}
+label{font-size:13px;color:var(--mut)}
+textarea,select{width:100%;background:color-mix(in srgb,var(--bg) 70%,var(--panel));color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:10px;font:inherit}
+textarea{min-height:64px;resize:vertical}
+input[type=color]{width:44px;height:34px;padding:2px;background:var(--bg);border:1px solid var(--line);border-radius:8px}
+input[type=range]{width:100%;accent-color:var(--acc)}
+.info{font-size:12.5px;color:var(--mut)}
+.ok{color:var(--acc)}.err{color:#d33}
+.swatches{display:flex;gap:6px;flex-wrap:wrap}
+.swatches button{width:28px;height:28px;border-radius:50%;padding:0;border:2px solid var(--line)}
+.swatches button.sel{outline:2px solid var(--txt);outline-offset:1px}
+footer{margin-top:14px;color:var(--mut);font-size:12.5px;text-align:center}
+/* ---- Vista Cómpeta (modo limpio) ---- */
+body.competa header,body.competa .tabs,body.competa .dlRow,body.competa footer,
+body.competa .badge,body.competa #btnCompeta,body.competa .hint{display:none}
+body.competa #paneC{display:none}
+body.competa .card{border:none;background:transparent;box-shadow:none;padding:4px}
+body.competa .canvasBox{width:min(96vw,86vh)}
+body.competa #btnExit{display:inline-block}
+#btnExit{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <h1>QR interactivo <span>Beper</span></h1>
+    <p class="sub">El suelo es el QR (siempre escaneable desde arriba) y el código crece en un árbol 3D: tronco café, hojas de tu color y pasto verde. QR estático y permanente, generado en tu dispositivo.</p>
+  </div>
+  <button id="btnTheme">☀️ Modo claro</button>
+</header>
+
+<div class="tabs">
+  <button class="tab active" id="tabV">🖥 Visualización</button>
+  <button class="tab" id="tabC">⚙ Configuración</button>
+</div>
+
+<section class="card" id="paneV">
+  <div class="canvasBox" id="box"><canvas id="cv"></canvas><div class="badge" id="badge"></div></div>
+  <div class="viewRow">
+    <button class="primary grow" id="btnSwap">⇅ Alternar vista</button>
+    <button id="btnCompeta">⛶ Vista Cómpeta</button>
+    <button id="btnExit">✕ Salir</button>
+  </div>
+  <p class="hint">Arrastra para orbitar · rueda/pellizco = zoom · doble clic o Espacio = alternar vista</p>
+  <div class="dlRow">
+    <button id="dlTop">⬇ Superior</button>
+    <button id="dl3d">⬇ Frontal</button>
+    <button id="dlBoth">⬇ Ambas</button>
+  </div>
+</section>
+
+<section class="card" id="paneC" hidden>
+  <div class="sec">
+    <h3>1 · Enlace o texto del QR</h3>
+    <textarea id="txt">https://www.ejemplo.com</textarea>
+    <div class="row">
+      <label style="flex:1">Corrección de errores
+        <select id="ecl"><option value="L">L (7%)</option><option value="M">M (15%)</option><option value="Q" selected>Q (25%)</option><option value="H">H (30%)</option></select>
+      </label>
+    </div>
+    <p class="info" id="qrInfo"></p>
+  </div>
+  <div class="sec">
+    <h3>2 · Árbol · color de las hojas</h3>
+    <div class="row">
+      <label>Hojas <input type="color" id="cLeaf" value="#e76f92"></label>
+      <div class="swatches" id="sw"></div>
+    </div>
+    <div class="row"><button id="reroll">🎲 Nuevo árbol</button></div>
+    <div class="row"><label>Escala del árbol <span id="vTS"></span></label><input type="range" id="rTS" min="60" max="140" value="100"></div>
+    <div class="row"><label>Densidad del follaje <span id="vFD"></span></label><input type="range" id="rFD" min="40" max="100" value="72"></div>
+    <p class="info">Solo tú eliges el color de las hojas. Tronco (café), pasto y perímetro (verdes) y claros (crema) son fijos. El QR usa un tono profundo de tus hojas para seguir escaneable, y en la vista superior el árbol se oculta por completo.</p>
+  </div>
+  <div class="sec">
+    <h3>3 · Escena</h3>
+    <div class="row"><label>Elevación vista frontal <span id="vEl"></span></label><input type="range" id="rEl" min="10" max="80" value="28"></div>
+    <div class="row"><label>Rotación <span id="vAz"></span></label><input type="range" id="rAz" min="-90" max="90" value="45"></div>
+    <div class="row"><label>Separación de módulos <span id="vG"></span></label><input type="range" id="rG" min="0" max="25" value="10"></div>
+    <div class="row"><label>Luz / volumen <span id="vL"></span></label><input type="range" id="rL" min="0" max="100" value="55"></div>
+  </div>
+</section>
+
+<footer>Creado por Beper 2026</footer>
+</div>
+
+<script>
+"use strict";
+/* ========== utilidades ========== */
+const $=s=>document.querySelector(s);
+const clamp=(v,a,b)=>v<a?a:v>b?b:v, lerp=(a,b,t)=>a+(b-a)*t;
+const hex2rgb=h=>{h=h.replace('#','');if(h.length===3)h=[...h].map(c=>c+c).join('');const n=parseInt(h,16);return[n>>16&255,n>>8&255,n&255]};
+const rgb2hex=(r,g,b)=>'#'+[r,g,b].map(v=>clamp(Math.round(v),0,255).toString(16).padStart(2,'0')).join('');
+function rgb2hsl(r,g,b){r/=255;g/=255;b/=255;const mx=Math.max(r,g,b),mn=Math.min(r,g,b);let h=0,s=0,l=(mx+mn)/2;const d=mx-mn;
+ if(d){s=l>.5?d/(2-mx-mn):d/(mx+mn);switch(mx){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;default:h=(r-g)/d+4}h/=6}return[h,s,l]}
+function hsl2rgb(h,s,l){h=((h%1)+1)%1;const f=(p,q,t)=>{t=((t%1)+1)%1;if(t<1/6)return p+(q-p)*6*t;if(t<1/2)return q;if(t<2/3)return p+(q-p)*(2/3-t)*6;return p};
+ if(!s){const v=l*255;return[v,v,v]}const q=l<.5?l*(1+s):l+s-l*s,p=2*l-q;return[f(p,q,h+1/3)*255,f(p,q,h)*255,f(p,q,h-1/3)*255]}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function fnv(str){let h=0x811c9dc5;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,0x01000193)}return h>>>0}
+function hash3(x,y,z,seed){let h=seed^Math.imul(Math.round(x*13),374761393)^Math.imul(Math.round(y*17),668265263)^Math.imul(Math.round(z*19),1274126177);
+ h=Math.imul(h^h>>>15,2246822519);h=Math.imul(h^h>>>13,3266489917);h^=h>>>16;return(h>>>0)/4294967296}
+const pick=(arr,r)=>arr[Math.min(arr.length-1,Math.floor(r*arr.length))];
+
+/* ========== colores fijos (tronco, pasto, claros, buscadores) ========== */
+const TRUNK=['#6b4a2f','#7d5a3a','#5d3f28','#8a6a45'].map(hex2rgb);
+const GRASS=['#5da24a','#79b95c','#4c8f3d','#63ad50','#86c46a'].map(hex2rgb);
+const GRASS_GROUND=hex2rgb('#54944a');          /* piso verde del perímetro en 3D */
+const LIGHT=hex2rgb('#f7f0e4');                  /* módulos claros + zona de silencio */
+const FINDER=hex2rgb('#2e7d32');                 /* buscadores verdes */
+const LIGHT_HEX='#f7f0e4', FINDER_HEX='#2e7d32';
+
+/* ========== codificador QR (ISO/IEC 18004, byte mode, v1–v10) ========== */
+const EPB={L:[-1,7,10,15,20,26,18,20,24,30,18],M:[-1,10,16,26,18,24,16,18,22,22,26],Q:[-1,13,22,18,26,18,24,18,22,20,24],H:[-1,17,28,22,16,22,28,26,26,24,28]};
+const NBL={L:[-1,1,1,1,1,1,2,2,2,2,4],M:[-1,1,1,1,2,2,4,4,4,5,5],Q:[-1,1,1,2,2,4,4,6,6,8,8],H:[-1,1,1,2,4,4,4,5,6,8,8]};
+const FMT={L:1,M:0,Q:3,H:2};
+const gbit=(x,i)=>(x>>>i)&1;
+function gfMul(x,y){let z=0;for(let i=7;i>=0;i--){z=(z<<1)^((z>>>7)*0x11D);z^=((y>>>i)&1)*x}return z}
+function rsDivisor(deg){const res=new Array(deg).fill(0);res[deg-1]=1;let root=1;
+ for(let i=0;i<deg;i++){for(let j=0;j<deg;j++){res[j]=gfMul(res[j],root);if(j+1<deg)res[j]^=res[j+1]}root=gfMul(root,2)}return res}
+function rsRemainder(data,div){const res=new Array(div.length).fill(0);
+ for(const b of data){const f=b^res.shift();res.push(0);div.forEach((c,i)=>res[i]^=gfMul(c,f))}return res}
+function rawModules(v){let r=(16*v+128)*v+64;if(v>=2){const na=Math.floor(v/7)+2;r-=(25*na-10)*na-55;if(v>=7)r-=36}return r}
+function dataCW(v,e){return Math.floor(rawModules(v)/8)-EPB[e][v]*NBL[e][v]}
+function makeQR(text,ecl){
+ const bytes=new TextEncoder().encode(text);let ver=0;
+ for(let v=1;v<=10;v++){const cb=v<10?8:16;if(4+cb+8*bytes.length<=dataCW(v,ecl)*8){ver=v;break}}
+ if(!ver)throw new Error('Texto demasiado largo (máx. ~200 caracteres). Acórtalo.');
+ const size=ver*4+17;
+ const M=Array.from({length:size},()=>new Uint8Array(size)),FN=Array.from({length:size},()=>new Uint8Array(size));
+ const set=(x,y,v)=>{if(x<0||y<0||x>=size||y>=size)return;M[y][x]=v?1:0;FN[y][x]=1};
+ for(let i=0;i<size;i++){set(6,i,i%2===0);set(i,6,i%2===0)}
+ const finder=(px,py)=>{for(let dy=-1;dy<=7;dy++)for(let dx=-1;dx<=7;dx++){
+   const inb=dx>=0&&dx<=6&&dy>=0&&dy<=6,d=Math.max(Math.abs(dx-3),Math.abs(dy-3));set(px+dx,py+dy,inb?d!==2:0)}};
+ finder(0,0);finder(size-7,0);finder(0,size-7);
+ if(ver!==1){const na=Math.floor(ver/7)+2,step=(ver===32)?26:Math.ceil((ver*4+4)/(na*2-2))*2;
+  const pos=[6];for(let i=1;i<na;i++)pos.push(size-7-step*(na-1-i));
+  for(const r of pos)for(const c of pos){
+   if((r===6&&c===6)||(r===6&&c===pos[na-1])||(r===pos[na-1]&&c===6))continue;
+   for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++)set(c+dx,r+dy,Math.max(Math.abs(dx),Math.abs(dy))!==1)}}
+ if(ver>=7){let rem=ver;for(let i=0;i<12;i++)rem=(rem<<1)^((rem>>>11)*0x1F25);const b=(ver<<12)|rem;
+  for(let i=0;i<18;i++){const bit=gbit(b,i),a=size-11+i%3,bb=Math.floor(i/3);set(a,bb,bit);set(bb,a,bit)}}
+ const drawFmt=mask=>{const d=FMT[ecl]<<3|mask;let rem=d;
+  for(let i=0;i<10;i++)rem=(rem<<1)^((rem>>>9)*0x537);
+  const bits=(d<<10|rem)^0x5412;
+  for(let i=0;i<=5;i++)set(8,i,gbit(bits,i));set(8,7,gbit(bits,6));set(8,8,gbit(bits,7));set(7,8,gbit(bits,8));
+  for(let i=9;i<15;i++)set(14-i,8,gbit(bits,i));
+  for(let i=0;i<8;i++)set(size-1-i,8,gbit(bits,i));
+  for(let i=8;i<15;i++)set(8,size-15+i,gbit(bits,i));
+  set(8,size-8,1)};
+ drawFmt(0);
+ const cap=dataCW(ver,ecl),ba=[];
+ const put=(v,l)=>{for(let i=l-1;i>=0;i--)ba.push((v>>>i)&1)};
+ put(4,4);put(bytes.length,ver<10?8:16);for(const b of bytes)put(b,8);
+ put(0,Math.min(4,cap*8-ba.length));while(ba.length%8)ba.push(0);
+ const cw=[];for(let i=0;i<ba.length;i+=8){let b=0;for(let j=0;j<8;j++)b=(b<<1)|ba[i+j];cw.push(b)}
+ for(let p=0;cw.length<cap;p++)cw.push(p%2?0x11:0xEC);
+ const nb=NBL[ecl][ver],be=EPB[ecl][ver],raw=Math.floor(rawModules(ver)/8);
+ const nShort=nb-raw%nb,shortLen=Math.floor(raw/nb),div=rsDivisor(be),blocks=[];
+ for(let i=0,k=0;i<nb;i++){const dat=cw.slice(k,k+shortLen-be+(i<nShort?0:1));k+=dat.length;
+  const ecc=rsRemainder(dat,div);if(i<nShort)dat.push(0);blocks.push(dat.concat(ecc))}
+ const all=[];for(let i=0;i<blocks[0].length;i++)for(let j=0;j<nb;j++)if(i!==shortLen-be||j>=nShort)all.push(blocks[j][i]);
+ let bi=0;
+ for(let right=size-1;right>=1;right-=2){if(right===6)right=5;
+  for(let vert=0;vert<size;vert++)for(let j=0;j<2;j++){
+   const x=right-j,up=((right+1)&2)===0,y=up?size-1-vert:vert;
+   if(!FN[y][x]&&bi<all.length*8){M[y][x]=gbit(all[bi>>>3],7-(bi&7));bi++}}}
+ const cond=(mk,x,y)=>{switch(mk){case 0:return(x+y)%2===0;case 1:return y%2===0;case 2:return x%3===0;case 3:return(x+y)%3===0;
+  case 4:return(Math.floor(y/2)+Math.floor(x/3))%2===0;case 5:return(x*y)%2+(x*y)%3===0;
+  case 6:return((x*y)%2+(x*y)%3)%2===0;default:return((x+y)%2+(x*y)%3)%2===0}};
+ const pen=m=>{let p=0;const run=a=>{let s=0,r=1;for(let i=1;i<a.length;i++){if(a[i]===a[i-1])r++;else{if(r>=5)s+=3+r-5;r=1}}if(r>=5)s+=3+r-5;return s};
+  for(let y=0;y<size;y++)p+=run(m[y]);
+  for(let x=0;x<size;x++){const c=[];for(let y=0;y<size;y++)c.push(m[y][x]);p+=run(c)}
+  for(let y=0;y<size-1;y++)for(let x=0;x<size-1;x++){const v=m[y][x];if(v===m[y][x+1]&&v===m[y+1][x]&&v===m[y+1][x+1])p+=3}
+  let dk=0;for(let y=0;y<size;y++)for(let x=0;x<size;x++)dk+=m[y][x];
+  p+=Math.floor(Math.abs(dk*100/(size*size)-50)/5)*10;return p};
+ let best=null,bp=1e18;
+ for(let mk=0;mk<8;mk++){
+  for(let y=0;y<size;y++)for(let x=0;x<size;x++)if(!FN[y][x]&&cond(mk,x,y))M[y][x]^=1;
+  drawFmt(mk);
+  const p=pen(M);if(p<bp){bp=p;best=M.map(r=>Uint8Array.from(r))}
+  for(let y=0;y<size;y++)for(let x=0;x<size;x++)if(!FN[y][x]&&cond(mk,x,y))M[y][x]^=1;
+ }
+ return{m:best,size,ver};
+}
+
+/* ========== estado ========== */
+const S={qr:null,n:0,q:4,G:0,ground:null,quiet:null,tree:[],treeH:10,
+ seed:1,seedOff:0,treeScale:1,folDens:.72,
+ leafHex:'#e76f92',leafT:[],petalT:[],colQR:null,qrHex:'#b8395f',
+ magic:{theta:45*Math.PI/180,alpha:28*Math.PI/180},
+ cam:{theta:45*Math.PI/180,alpha:28*Math.PI/180,zoom:1},
+ view:'3d',gap:.10,light:.55,anim:null};
+
+/* ========== color de hojas → tonos + QR profundo ========== */
+function setLeaf(hex){
+ S.leafHex=hex;
+ const[r,g,b]=hex2rgb(hex);let[h,s,l]=rgb2hsl(r,g,b);
+ s=clamp(s,.35,.92);const base=clamp(l,.42,.72);
+ const Ls=[base-.10,base-.03,base+.05,base-.16,base+.11,base+.02];
+ S.leafT=Ls.map(L=>hsl2rgb(h,s,clamp(L,.30,.86)));
+ S.petalT=[hsl2rgb(h,s*.85,.80),hsl2rgb(h,s*.7,.87),hsl2rgb(h,s,.74)];
+ S.colQR=hsl2rgb(h,clamp(s,.45,.85),.30);
+ S.qrHex=rgb2hex(...S.colQR);
+ rebuildAll();
+}
+
+/* ========== suelo (plaza QR) ========== */
+function computeGround(){
+ if(!S.qr)return;
+ const n=S.n,q=S.q,G=n+2*q;S.G=G;
+ const g=new Array(G*G),qm=new Uint8Array(G*G);
+ const isF=(x,y)=>(x<8&&y<8)||(x>=n-8&&y<8)||(x<8&&y>=n-8);
+ for(let j=0;j<G;j++)for(let i=0;i<G;i++){
+  const k=j*G+i,inQR=i>=q&&i<q+n&&j>=q&&j<q+n;
+  if(!inQR){g[k]=LIGHT;qm[k]=1;continue}
+  const x=i-q,y=j-q;
+  g[k]=S.qr.m[y][x]?(isF(x,y)?FINDER:S.colQR):LIGHT}
+ S.ground=g;S.quiet=qm;
+}
+
+/* ========== árbol procedural (tronco café fijo, pasto verde fijo) ========== */
+function buildTree(){
+ if(!S.qr)return;
+ const n=S.n,sc=S.treeScale,dens=S.folDens;
+ const rnd=mulberry32(S.seed^S.seedOff);
+ const vox=[];
+ const H=n*0.85*sc,zT=H*0.42,R=n*0.26*sc,vu=0.85;
+ let tx=0,ty=0;
+ for(let z=0;z<zT;z+=vu*0.85){
+  const t=z/zT;tx+=(rnd()-0.5)*0.14;ty+=(rnd()-0.5)*0.14;
+  vox.push({x:tx,y:ty,z0:z,z1:z+vu,s:clamp((1.6-0.9*t)*sc,0.8,2.3),c:pick(TRUNK,rnd())})}
+ const blobs=[{x:0,y:0,z:zT+R*0.5,r:R}];
+ const nb=4+Math.floor(rnd()*3);
+ for(let b=0;b<nb;b++){
+  const az=rnd()*Math.PI*2,L=R*(0.9+rnd()*0.5);
+  const ex=Math.cos(az)*L*0.8,ey=Math.sin(az)*L*0.8,ez=zT+R*(0.2+rnd()*0.5);
+  const steps=Math.max(3,Math.ceil(L/(vu*1.3)));
+  for(let s2=1;s2<=steps;s2++){const t=s2/steps;
+   vox.push({x:tx+(ex-tx)*t,y:ty+(ey-ty)*t,z0:zT*0.8+(ez-zT*0.8)*t,z1:zT*0.8+(ez-zT*0.8)*t+vu,
+    s:1.15*sc*(1-t*0.45),c:pick(TRUNK,rnd())})}
+  blobs.push({x:ex,y:ey,z:ez+R*0.28,r:R*(0.45+rnd()*0.28)})}
+ for(const bl of blobs){
+  const r=bl.r;
+  for(let x=-r;x<=r;x+=vu)for(let y=-r;y<=r;y+=vu)for(let z=-r*0.85;z<=r*0.85;z+=vu){
+   const d=Math.sqrt(x*x+y*y+z*z*1.25),hs=hash3(x+bl.x,y+bl.y,z+bl.z,S.seed^S.seedOff);
+   if(d<r*(0.60+0.40*hs)*(0.5+0.5*dens)){
+    if(vox.length>5200)continue;
+    vox.push({x:bl.x+x+(hs-0.5)*0.3,y:bl.y+y+(hs-0.5)*0.3,z0:bl.z+z,z1:bl.z+z+vu*0.95,
+     s:vu*1.06,c:pick(S.leafT,hs)})}}}
+ const np=Math.floor(n*1.6*dens);
+ for(let i=0;i<np;i++){const a=rnd()*Math.PI*2,rr=Math.pow(rnd(),0.6)*n*0.42;
+  vox.push({x:Math.cos(a)*rr,y:Math.sin(a)*rr,z0:0.14,z1:0.3,s:0.3+rnd()*0.25,c:pick(S.petalT,rnd())})}
+ const q=S.q,G=S.G,c0=(G-1)/2;
+ for(let j=0;j<G;j++)for(let i=0;i<G;i++){
+  const inQ=!(i>=q&&i<q+n&&j>=q&&j<q+n);if(!inQ)continue;
+  const edge=Math.min(i,j,G-1-i,G-1-j);
+  const p=edge<=1?0.9:edge<=2?0.5:0.12;
+  if(rnd()<p){const bl=1+Math.floor(rnd()*2);
+   for(let b2=0;b2<bl;b2++){
+    const gh=0.35+rnd()*0.55;
+    vox.push({x:i-c0+(rnd()-0.5)*0.7,y:c0-j+(rnd()-0.5)*0.7,z0:0.1,z1:0.1+gh,
+     s:0.28+rnd()*0.22,c:pick(GRASS,rnd())})}}}
+ S.tree=vox;S.treeH=H+R*1.1;
+}
+
+/* ========== render 3D ========== */
+function sceneBg(){return document.body.classList.contains('light')?[242,235,220]:[26,20,24]}
+function camCalc(cam,W,H){
+ const G=S.G,ct=Math.cos(cam.theta),st=Math.sin(cam.theta),sa=Math.sin(cam.alpha),ca=Math.cos(cam.alpha);
+ const um=(G/2)*(Math.abs(ct)+Math.abs(st));
+ const span=2*um*sa+S.treeH*ca+2;
+ const zm=Math.min(W/(2*um+2),H/span)*cam.zoom;
+ return{ct,st,sa,ca,zm,cx:W/2,cy:H/2};
+}
+function renderTo(cv,cam){
+ const W=cv.width,H=cv.height,ctx=cv.getContext('2d');
+ const G=S.G,{ct,st,sa,ca,zm,cx,cy}=camCalc(cam,W,H);
+ const bg=sceneBg();
+ const g=ctx.createLinearGradient(0,0,0,H);
+ g.addColorStop(0,rgb2hex(bg[0]*1.1+10,bg[1]*1.1+10,bg[2]*1.1+10));
+ g.addColorStop(1,rgb2hex(bg[0]*0.78,bg[1]*0.78,bg[2]*0.78));
+ ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+ if(!S.ground)return;
+ const proj=(x,y,z)=>{const u=x*ct+y*st,v=-x*st+y*ct;return[cx+u*zm,cy+(-(v*sa+z*ca)+(S.treeH*ca)/2)*zm]};
+ const aDeg=cam.alpha*180/Math.PI;
+ let v=clamp((78-aDeg)/22,0,1);v=v*v*(3-2*v);       /* 0 = cenital: árbol oculto y perímetro blanco */
+ const gapEff=S.gap*clamp((78-aDeg)/30,0,1);
+ const c0=(G-1)/2,TH=0.16;
+ const quietCol=[lerp(LIGHT[0],GRASS_GROUND[0],v),lerp(LIGHT[1],GRASS_GROUND[1],v),lerp(LIGHT[2],GRASS_GROUND[2],v)];
+ const items=[];
+ for(let k=0;k<G*G;k++){
+  const x=(k%G)-c0,y=c0-((k/G)|0);
+  items.push({g:k,d:-(-x*st+y*ct)*ca+TH*sa})}
+ if(v>0.02)for(let t=0;t<S.tree.length;t++){
+  const vo=S.tree[t],z0=vo.z0*v,z1=vo.z1*v,sv=vo.s*(0.35+0.65*v);
+  if(sv<0.03)continue;
+  items.push({t,d:-(-vo.x*st+vo.y*ct)*ca+((z0+z1)/2)*sa,z0,z1,s:sv,c:vo.c,x:vo.x,y:vo.y})}
+ items.sort((a,b)=>a.d-b.d);
+ const visX=Math.abs(st)*ca>0.02?(st>0?1:-1):0;
+ const visY=Math.abs(ct)*ca>0.02?(ct<0?1:-1):0;
+ const L=[-0.42,-0.48,0.77];
+ const shade=(nx,ny,nz)=>{const dt=Math.max(0,nx*L[0]+ny*L[1]+nz*L[2]);return lerp(1,0.42+0.62*dt,S.light)};
+ const sT=shade(0,0,1),sX=shade(visX,0,0),sY=shade(0,visY,0);
+ const quad=(pts,col)=>{ctx.fillStyle=col;ctx.strokeStyle=col;ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);for(let i=1;i<4;i++)ctx.lineTo(pts[i][0],pts[i][1]);ctx.closePath();ctx.fill();ctx.stroke()};
+ const mix=(c,s)=>'rgb('+Math.round(clamp(c[0]*s,0,255))+','+Math.round(clamp(c[1]*s,0,255))+','+Math.round(clamp(c[2]*s,0,255))+')';
+ const hs0=(1-gapEff)/2;
+ for(const it of items){
+  if(it.g!==undefined){
+   const x=(it.g%G)-c0,y=c0-((it.g/G)|0);
+   const col=S.quiet[it.g]?quietCol:S.ground[it.g];
+   quad([proj(x-hs0,y-hs0,TH),proj(x+hs0,y-hs0,TH),proj(x+hs0,y+hs0,TH),proj(x-hs0,y+hs0,TH)],mix(col,sT));
+  }else{
+   const hs=it.s/2,x0=it.x,y0=it.y;
+   const xa=x0-hs,xb=x0+hs,ya=y0-hs,yb=y0+hs;
+   if(visX){const xf=visX>0?xb:xa;
+    quad([proj(xf,ya,it.z1),proj(xf,yb,it.z1),proj(xf,yb,it.z0),proj(xf,ya,it.z0)],mix(it.c,sX))}
+   if(visY){const yf=visY>0?yb:ya;
+    quad([proj(xa,yf,it.z1),proj(xb,yf,it.z1),proj(xb,yf,it.z0),proj(xa,yf,it.z0)],mix(it.c,sY))}
+   quad([proj(xa,ya,it.z1),proj(xb,ya,it.z1),proj(xb,yb,it.z1),proj(xa,yb,it.z1)],mix(it.c,sT));
+  }
+ }
+}
+
+/* ========== QR plano (descarga segura) ========== */
+function flatQRCanvas(px){
+ const G=S.G,c=document.createElement('canvas');c.width=c.height=px*G;
+ const x=c.getContext('2d');
+ x.fillStyle=LIGHT_HEX;x.fillRect(0,0,c.width,c.height);
+ const q=S.q,n=S.n;
+ const isF=(a,b)=>(a<8&&b<8)||(a>=n-8&&b<8)||(a<8&&b>=n-8);
+ for(let j=0;j<n;j++)for(let i=0;i<n;i++)if(S.qr.m[j][i]){
+  x.fillStyle=isF(i,j)?FINDER_HEX:S.qrHex;
+  x.fillRect((q+i)*px,(q+j)*px,px,px)}
+ return c;
+}
+
+/* ========== vistas / UI ========== */
+const cv=$('#cv'),box=$('#box');
+function renderMain(){
+ renderTo(cv,S.cam);
+ const aDeg=S.cam.alpha*180/Math.PI;
+ $('#badge').textContent=aDeg>75?'Vista superior · QR escaneable':'Vista frontal · árbol 3D';
+}
+function resize(){const w=box.clientWidth,dpr=Math.min(2,window.devicePixelRatio||1);
+ cv.width=Math.max(2,Math.round(w*dpr));cv.height=cv.width;renderMain()}
+function goTo(view,animate=true){
+ S.view=view;
+ const from={...S.cam};
+ const to=view==='top'?{theta:0,alpha:Math.PI/2,zoom:1}:{theta:S.magic.theta,alpha:S.magic.alpha,zoom:1};
+ cancelAnimationFrame(S.anim);
+ if(!animate){S.cam=to;renderMain();return}
+ const t0=performance.now(),dur=800;
+ const step=t=>{const p=clamp((t-t0)/dur,0,1),e=p<.5?4*p*p*p:1-Math.pow(-2*p+2,3)/2;
+  S.cam={theta:lerp(from.theta,to.theta,e),alpha:lerp(from.alpha,to.alpha,e),zoom:lerp(from.zoom,to.zoom,e)};
+  renderMain();if(p<1)S.anim=requestAnimationFrame(step)};
+ S.anim=requestAnimationFrame(step);
+}
+$('#btnSwap').onclick=()=>goTo(S.view==='top'?'3d':'top');
+cv.addEventListener('dblclick',()=>goTo(S.view==='top'?'3d':'top'));
+addEventListener('keydown',e=>{
+ if(e.code==='Escape'&&document.body.classList.contains('competa'))toggleCompeta(false);
+ if(e.code==='Space'&&!/TEXTAREA|INPUT|SELECT/.test(e.target.tagName)){e.preventDefault();goTo(S.view==='top'?'3d':'top')}});
+let ptrs=new Map(),pinch=0;
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,[e.clientX,e.clientY]);
+ if(ptrs.size===2){const[p,q]=[...ptrs.values()];pinch=Math.hypot(p[0]-q[0],p[1]-q[1])}});
+cv.addEventListener('pointermove',e=>{
+ if(!ptrs.has(e.pointerId))return;
+ const prev=ptrs.get(e.pointerId);ptrs.set(e.pointerId,[e.clientX,e.clientY]);
+ if(ptrs.size===1){S.view='3d';
+  S.cam.theta=clamp(S.cam.theta+(e.clientX-prev[0])*0.006,-1.57,1.57);
+  S.cam.alpha=clamp(S.cam.alpha-(e.clientY-prev[1])*0.006,0.15,Math.PI/2);
+  renderMain()}
+ else if(ptrs.size===2){const[p,q]=[...ptrs.values()];const d=Math.hypot(p[0]-q[0],p[1]-q[1]);
+  if(pinch)S.cam.zoom=clamp(S.cam.zoom*d/pinch,0.4,2.5);pinch=d;renderMain()}});
+const endPtr=e=>{ptrs.delete(e.pointerId);if(ptrs.size<2)pinch=0};
+cv.addEventListener('pointerup',endPtr);cv.addEventListener('pointercancel',endPtr);
+cv.addEventListener('wheel',e=>{e.preventDefault();S.cam.zoom=clamp(S.cam.zoom*(e.deltaY>0?0.92:1.08),0.4,2.5);renderMain()},{passive:false});
+
+/* pestañas */
+$('#tabV').onclick=()=>{$('#tabV').classList.add('active');$('#tabC').classList.remove('active');$('#paneV').hidden=false;$('#paneC').hidden=true};
+$('#tabC').onclick=()=>{$('#tabC').classList.add('active');$('#tabV').classList.remove('active');$('#paneC').hidden=false;$('#paneV').hidden=true};
+
+/* vista Cómpeta */
+function toggleCompeta(on){document.body.classList.toggle('competa',on);setTimeout(resize,30)}
+$('#btnCompeta').onclick=()=>toggleCompeta(true);
+$('#btnExit').onclick=()=>toggleCompeta(false);
+
+/* modo claro / oscuro */
+function setTheme(light){document.body.classList.toggle('light',light);
+ $('#btnTheme').textContent=light?'🌙 Modo oscuro':'☀️ Modo claro';renderMain()}
+$('#btnTheme').onclick=()=>setTheme(!document.body.classList.contains('light'));
+
+/* descargas */
+function dl(c,name){c.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000)},'image/png')}
+$('#dlTop').onclick=()=>dl(flatQRCanvas(Math.max(20,Math.floor(1600/S.G))),'beper-qr-superior.png');
+$('#dl3d').onclick=()=>{const c=document.createElement('canvas');c.width=c.height=1600;
+ renderTo(c,{theta:S.magic.theta,alpha:S.magic.alpha,zoom:1});dl(c,'beper-qr-frontal.png')};
+$('#dlBoth').onclick=()=>{
+ const light=document.body.classList.contains('light');
+ const W=2000,Hh=1180,c=document.createElement('canvas');c.width=W;c.height=Hh;
+ const x=c.getContext('2d');
+ x.fillStyle=light?'#f2ead9':'#0b0f17';x.fillRect(0,0,W,Hh);
+ x.fillStyle=light?'#2b2620':'#e9effc';x.font='bold 54px system-ui';x.fillText('QR interactivo Beper',60,86);
+ x.fillStyle=light?'#6d6455':'#94a5c4';x.font='28px system-ui';
+ x.fillText('Vista superior: QR escaneable',60,1100);
+ x.fillText('Vista frontal: el código crece',1040,1100);
+ x.drawImage(flatQRCanvas(Math.max(10,Math.floor(900/S.G))),60,140,900,900);
+ const t=document.createElement('canvas');t.width=t.height=900;
+ renderTo(t,{theta:S.magic.theta,alpha:S.magic.alpha,zoom:1});x.drawImage(t,1040,140,900,900);
+ x.fillStyle=light?'#8a8072':'#5c6c8c';x.font='24px system-ui';x.fillText('Creado por Beper 2026',60,1150);
+ dl(c,'beper-qr-ambas.png')};
+
+/* ========== configuración ========== */
+function rebuildAll(){computeGround();buildTree();renderMain()}
+function genQR(){
+ try{S.qr=makeQR($('#txt').value,$('#ecl').value);S.n=S.qr.size;S.seed=fnv($('#txt').value);
+  $('#qrInfo').innerHTML='<span class="ok">✓ QR estático generado</span> · versión '+S.qr.ver+' · '+S.n+'×'+S.n+' módulos · nivel '+$('#ecl').value+' · permanente (sin servicios externos)';
+  rebuildAll()}
+ catch(err){$('#qrInfo').innerHTML='<span class="err">'+err.message+'</span>'}}
+let tT=null;
+$('#txt').addEventListener('input',()=>{clearTimeout(tT);tT=setTimeout(genQR,250)});
+$('#ecl').addEventListener('change',genQR);
+$('#reroll').onclick=()=>{S.seedOff=(S.seedOff+2654435761)%4294967296;buildTree();renderMain()};
+$('#cLeaf').addEventListener('input',e=>{markSw(null);setLeaf(e.target.value)});
+/* muestras rápidas de color de hojas */
+const SW=['#e76f92','#46a457','#e8842c','#e8b422','#9b6bd3','#c94f2e'];
+SW.forEach(hex=>{const b=document.createElement('button');b.style.background=hex;b.title=hex;
+ b.onclick=()=>{$('#cLeaf').value=hex;markSw(b);setLeaf(hex)};$('#sw').appendChild(b)});
+function markSw(btn){[...$('#sw').children].forEach(x=>x.classList.toggle('sel',x===btn))}
+const sliders=[['rEl',v=>{S.magic.alpha=v*Math.PI/180;if(S.view==='3d')S.cam.alpha=S.magic.alpha;$('#vEl').textContent=v+'°'},0],
+ ['rAz',v=>{S.magic.theta=v*Math.PI/180;if(S.view==='3d')S.cam.theta=S.magic.theta;$('#vAz').textContent=v+'°'},0],
+ ['rG',v=>{S.gap=v/100;$('#vG').textContent=v+'%'},0],
+ ['rL',v=>{S.light=v/100;$('#vL').textContent=v+'%'},0],
+ ['rTS',v=>{S.treeScale=v/100;$('#vTS').textContent=v+'%'},1],
+ ['rFD',v=>{S.folDens=v/100;$('#vFD').textContent=v+'%'},1]];
+sliders.forEach(([id,fn,tree])=>{const el=$('#'+id);
+ const run=()=>{fn(parseFloat(el.value));if(tree)buildTree();renderMain()};
+ el.addEventListener('input',run);fn(parseFloat(el.value))});
+
+/* arranque */
+new ResizeObserver(()=>resize()).observe(box);
+setLeaf('#e76f92');
+markSw($('#sw').children[0]);
+genQR();resize();goTo('3d',false);
+setTimeout(()=>goTo('top',true),600);
+</script>
+</body>
+</html>
