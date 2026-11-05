@@ -138,14 +138,11 @@ function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a
 function fnv(str){let h=0x811c9dc5;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,0x01000193)}return h>>>0}
 function hash3(x,y,z,seed){let h=seed^Math.imul(Math.round(x*13),374761393)^Math.imul(Math.round(y*17),668265263)^Math.imul(Math.round(z*19),1274126177);
  h=Math.imul(h^h>>>15,2246822519);h=Math.imul(h^h>>>13,3266489917);h^=h>>>16;return(h>>>0)/4294967296}
-const pick=(arr,r)=>arr[Math.min(arr.length-1,Math.floor(r*arr.length))];
 
-/* ========== colores fijos (tronco, pasto, claros, buscadores) ========== */
+/* ========== colores fijos + tabla de paleta ========== */
 const TRUNK=['#6b4a2f','#7d5a3a','#5d3f28','#8a6a45'].map(hex2rgb);
 const GRASS=['#5da24a','#79b95c','#4c8f3d','#63ad50','#86c46a'].map(hex2rgb);
-const GRASS_GROUND=hex2rgb('#54944a');          /* piso verde del perímetro en 3D */
-const LIGHT=hex2rgb('#f7f0e4');                  /* módulos claros + zona de silencio */
-const FINDER=hex2rgb('#2e7d32');                 /* buscadores verdes */
+const GRASS_GROUND=hex2rgb('#54944a'), LIGHT=hex2rgb('#f7f0e4'), FINDER=hex2rgb('#2e7d32');
 const LIGHT_HEX='#f7f0e4', FINDER_HEX='#2e7d32';
 
 /* ========== codificador QR (ISO/IEC 18004, byte mode, v1–v10) ========== */
@@ -223,51 +220,53 @@ function makeQR(text,ecl){
 }
 
 /* ========== estado ========== */
-const S={qr:null,n:0,q:4,G:0,ground:null,quiet:null,tree:[],treeH:10,
+const S={qr:null,n:0,q:4,G:0,gIdx:null,quiet:null,gx:null,gy:null,tree:[],treeH:10,
+ D:null,IDX:null,
  seed:1,seedOff:0,treeScale:1,folDens:.72,
- leafHex:'#e76f92',leafT:[],petalT:[],colQR:null,qrHex:'#b8395f',
+ leafHex:'#e76f92',leafT:[],petalT:[],colQR:LIGHT,qrHex:'#b8395f',
  magic:{theta:45*Math.PI/180,alpha:28*Math.PI/180},
  cam:{theta:45*Math.PI/180,alpha:28*Math.PI/180,zoom:1},
- view:'3d',gap:.10,light:.55,anim:null};
+ view:'3d',gap:.10,light:.55,anim:null,lod:false,
+ dprRest:1,dprAnim:1};
 
-/* ========== color de hojas → tonos + QR profundo ========== */
+/* ========== hojas → tonos + QR profundo ========== */
 function setLeaf(hex){
  S.leafHex=hex;
  const[r,g,b]=hex2rgb(hex);let[h,s,l]=rgb2hsl(r,g,b);
  s=clamp(s,.35,.92);const base=clamp(l,.42,.72);
- const Ls=[base-.10,base-.03,base+.05,base-.16,base+.11,base+.02];
- S.leafT=Ls.map(L=>hsl2rgb(h,s,clamp(L,.30,.86)));
+ S.leafT=[base-.10,base-.03,base+.05,base-.16,base+.11,base+.02].map(L=>hsl2rgb(h,s,clamp(L,.30,.86)));
  S.petalT=[hsl2rgb(h,s*.85,.80),hsl2rgb(h,s*.7,.87),hsl2rgb(h,s,.74)];
  S.colQR=hsl2rgb(h,clamp(s,.45,.85),.30);
  S.qrHex=rgb2hex(...S.colQR);
- rebuildAll();
+ renderMain();
 }
 
-/* ========== suelo (plaza QR) ========== */
+/* ========== suelo ========== */
 function computeGround(){
  if(!S.qr)return;
  const n=S.n,q=S.q,G=n+2*q;S.G=G;
- const g=new Array(G*G),qm=new Uint8Array(G*G);
- const isF=(x,y)=>(x<8&&y<8)||(x>=n-8&&y<8)||(x<8&&y>=n-8);
+ S.gIdx=new Uint8Array(G*G);S.quiet=new Uint8Array(G*G);
+ S.gx=new Float32Array(G*G);S.gy=new Float32Array(G*G);
+ const c0=(G-1)/2,isF=(x,y)=>(x<8&&y<8)||(x>=n-8&&y<8)||(x<8&&y>=n-8);
  for(let j=0;j<G;j++)for(let i=0;i<G;i++){
-  const k=j*G+i,inQR=i>=q&&i<q+n&&j>=q&&j<q+n;
-  if(!inQR){g[k]=LIGHT;qm[k]=1;continue}
+  const k=j*G+i;S.gx[k]=i-c0;S.gy[k]=c0-j;
+  const inQR=i>=q&&i<q+n&&j>=q&&j<q+n;
+  if(!inQR){S.gIdx[k]=0;S.quiet[k]=1;continue}
   const x=i-q,y=j-q;
-  g[k]=S.qr.m[y][x]?(isF(x,y)?FINDER:S.colQR):LIGHT}
- S.ground=g;S.quiet=qm;
+  S.gIdx[k]=S.qr.m[y][x]?(isF(x,y)?2:1):0}
 }
 
-/* ========== árbol procedural (tronco café fijo, pasto verde fijo) ========== */
+/* ========== árbol con poda de voxel interiores ========== */
 function buildTree(){
  if(!S.qr)return;
  const n=S.n,sc=S.treeScale,dens=S.folDens;
  const rnd=mulberry32(S.seed^S.seedOff);
  const vox=[];
- const H=n*0.85*sc,zT=H*0.42,R=n*0.26*sc,vu=0.85;
+ const H=n*0.85*sc,zT=H*0.42,R=n*0.26*sc,vu=1.0;
  let tx=0,ty=0;
  for(let z=0;z<zT;z+=vu*0.85){
   const t=z/zT;tx+=(rnd()-0.5)*0.14;ty+=(rnd()-0.5)*0.14;
-  vox.push({x:tx,y:ty,z0:z,z1:z+vu,s:clamp((1.6-0.9*t)*sc,0.8,2.3),c:pick(TRUNK,rnd())})}
+  vox.push({x:tx,y:ty,z0:z,z1:z+vu,s:clamp((1.6-0.9*t)*sc,0.8,2.3),pi:3+(rnd()*4|0)})}
  const blobs=[{x:0,y:0,z:zT+R*0.5,r:R}];
  const nb=4+Math.floor(rnd()*3);
  for(let b=0;b<nb;b++){
@@ -276,33 +275,46 @@ function buildTree(){
   const steps=Math.max(3,Math.ceil(L/(vu*1.3)));
   for(let s2=1;s2<=steps;s2++){const t=s2/steps;
    vox.push({x:tx+(ex-tx)*t,y:ty+(ey-ty)*t,z0:zT*0.8+(ez-zT*0.8)*t,z1:zT*0.8+(ez-zT*0.8)*t+vu,
-    s:1.15*sc*(1-t*0.45),c:pick(TRUNK,rnd())})}
+    s:1.15*sc*(1-t*0.45),pi:3+(rnd()*4|0)})}
   blobs.push({x:ex,y:ey,z:ez+R*0.28,r:R*(0.45+rnd()*0.28)})}
+ /* follaje: candidatos + poda de interiores (nunca visibles) */
+ const cands=[],occ=new Set();
+ const key=(X,Y,Z)=>((X+64)<<16)|((Y+64)<<8)|(Z+64);
  for(const bl of blobs){
   const r=bl.r;
   for(let x=-r;x<=r;x+=vu)for(let y=-r;y<=r;y+=vu)for(let z=-r*0.85;z<=r*0.85;z+=vu){
    const d=Math.sqrt(x*x+y*y+z*z*1.25),hs=hash3(x+bl.x,y+bl.y,z+bl.z,S.seed^S.seedOff);
    if(d<r*(0.60+0.40*hs)*(0.5+0.5*dens)){
-    if(vox.length>5200)continue;
-    vox.push({x:bl.x+x+(hs-0.5)*0.3,y:bl.y+y+(hs-0.5)*0.3,z0:bl.z+z,z1:bl.z+z+vu*0.95,
-     s:vu*1.06,c:pick(S.leafT,hs)})}}}
+    const X=Math.round((bl.x+x)/vu),Y=Math.round((bl.y+y)/vu),Z=Math.round((bl.z+z)/vu);
+    cands.push({x:bl.x+x+(hs-0.5)*0.3,y:bl.y+y+(hs-0.5)*0.3,z0:bl.z+z,z1:bl.z+z+vu*0.95,
+     s:vu*1.06,pi:12+(hs*6|0)%6,X,Y,Z});
+    occ.add(key(X,Y,Z))}}}
+ for(const c of cands){
+  if(vox.length>3000)break;
+  const{X,Y,Z}=c;
+  if(occ.has(key(X+1,Y,Z))&&occ.has(key(X-1,Y,Z))&&occ.has(key(X,Y+1,Z))&&
+     occ.has(key(X,Y-1,Z))&&occ.has(key(X,Y,Z+1))&&occ.has(key(X,Y,Z-1)))continue;
+  vox.push(c)}
  const np=Math.floor(n*1.6*dens);
  for(let i=0;i<np;i++){const a=rnd()*Math.PI*2,rr=Math.pow(rnd(),0.6)*n*0.42;
-  vox.push({x:Math.cos(a)*rr,y:Math.sin(a)*rr,z0:0.14,z1:0.3,s:0.3+rnd()*0.25,c:pick(S.petalT,rnd())})}
+  vox.push({x:Math.cos(a)*rr,y:Math.sin(a)*rr,z0:0.14,z1:0.3,s:0.3+rnd()*0.25,pi:18+(rnd()*3|0)})}
  const q=S.q,G=S.G,c0=(G-1)/2;
  for(let j=0;j<G;j++)for(let i=0;i<G;i++){
-  const inQ=!(i>=q&&i<q+n&&j>=q&&j<q+n);if(!inQ)continue;
+  if(i>=q&&i<q+n&&j>=q&&j<q+n)continue;
   const edge=Math.min(i,j,G-1-i,G-1-j);
-  const p=edge<=1?0.9:edge<=2?0.5:0.12;
-  if(rnd()<p){const bl=1+Math.floor(rnd()*2);
+  const p=edge<=1?0.85:edge<=2?0.4:0.10;
+  if(rnd()<p){const bl=1+(rnd()*2|0);
    for(let b2=0;b2<bl;b2++){
     const gh=0.35+rnd()*0.55;
     vox.push({x:i-c0+(rnd()-0.5)*0.7,y:c0-j+(rnd()-0.5)*0.7,z0:0.1,z1:0.1+gh,
-     s:0.28+rnd()*0.22,c:pick(GRASS,rnd())})}}}
+     s:0.28+rnd()*0.22,pi:7+(rnd()*5|0)})}}}
  S.tree=vox;S.treeH=H+R*1.1;
+ const cap=G*G+vox.length;
+ S.D=new Float32Array(cap);S.IDX=new Int32Array(cap);
+ for(let i=0;i<cap;i++)S.IDX[i]=i;
 }
 
-/* ========== render 3D ========== */
+/* ========== render ========== */
 function sceneBg(){return document.body.classList.contains('light')?[242,235,220]:[26,20,24]}
 function camCalc(cam,W,H){
  const G=S.G,ct=Math.cos(cam.theta),st=Math.sin(cam.theta),sa=Math.sin(cam.alpha),ca=Math.cos(cam.alpha);
@@ -311,88 +323,169 @@ function camCalc(cam,W,H){
  const zm=Math.min(W/(2*um+2),H/span)*cam.zoom;
  return{ct,st,sa,ca,zm,cx:W/2,cy:H/2};
 }
+const mixstr=(c,s)=>'rgb('+clamp(Math.round(c[0]*s),0,255)+','+clamp(Math.round(c[1]*s),0,255)+','+clamp(Math.round(c[2]*s),0,255)+')';
 function renderTo(cv,cam){
  const W=cv.width,H=cv.height,ctx=cv.getContext('2d');
- const G=S.G,{ct,st,sa,ca,zm,cx,cy}=camCalc(cam,W,H);
+ if(!S.gIdx)return;
+ const G=S.G,c0v=camCalc(cam,W,H);
+ const ct=c0v.ct,st=c0v.st,sa=c0v.sa,ca=c0v.ca,zm=c0v.zm,cx=c0v.cx,cy=c0v.cy;
  const bg=sceneBg();
  const g=ctx.createLinearGradient(0,0,0,H);
  g.addColorStop(0,rgb2hex(bg[0]*1.1+10,bg[1]*1.1+10,bg[2]*1.1+10));
  g.addColorStop(1,rgb2hex(bg[0]*0.78,bg[1]*0.78,bg[2]*0.78));
  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
- if(!S.ground)return;
- const proj=(x,y,z)=>{const u=x*ct+y*st,v=-x*st+y*ct;return[cx+u*zm,cy+(-(v*sa+z*ca)+(S.treeH*ca)/2)*zm]};
  const aDeg=cam.alpha*180/Math.PI;
- let v=clamp((78-aDeg)/22,0,1);v=v*v*(3-2*v);       /* 0 = cenital: árbol oculto y perímetro blanco */
+ const offY=(S.treeH*ca)/2;
+ const c0=(G-1)/2;
+ /* camino rápido cenital */
+ if(aDeg>89.3&&Math.abs(cam.theta)<0.02){
+  for(let b=0;b<3;b++){
+   ctx.beginPath();
+   for(let j=0;j<G;j++)for(let i=0;i<G;i++){
+    const k=j*G+i;if(S.gIdx[k]!==b)continue;
+    ctx.rect(cx+(i-c0-0.5)*zm,cy+((j-c0)-0.5)*zm,zm+0.5,zm+0.5)}
+   ctx.fillStyle=b===1?S.qrHex:b===2?FINDER_HEX:LIGHT_HEX;
+   ctx.fill()}
+  return;
+ }
+ const L=[-0.42,-0.48,0.77];
+ const sT=lerp(1,0.42+0.62*Math.max(0,L[2]),S.light);
+ const sX=lerp(1,0.42+0.62*Math.max(0,L[0]*(st>0?1:-1)),S.light);
+ const sY=lerp(1,0.42+0.62*Math.max(0,L[1]*(ct<0?1:-1)),S.light);
+ const pal=[LIGHT,S.colQR,FINDER].concat(TRUNK,GRASS,S.leafT,S.petalT);
+ const SH=new Array(pal.length*3);
+ for(let p=0;p<pal.length;p++){SH[p*3]=mixstr(pal[p],sT);SH[p*3+1]=mixstr(pal[p],sX);SH[p*3+2]=mixstr(pal[p],sY)}
+ let v=clamp((78-aDeg)/22,0,1);v=v*v*(3-2*v);
+ const quietStr=mixstr([lerp(LIGHT[0],GRASS_GROUND[0],v),lerp(LIGHT[1],GRASS_GROUND[1],v),lerp(LIGHT[2],GRASS_GROUND[2],v)],sT);
+ const gStr=[SH[0],SH[3],SH[6]];
+ const GG=G*G,D=S.D,IDX=S.IDX,tree=S.tree,total=GG+tree.length;
+ for(let k=0;k<GG;k++)D[k]=(S.gx[k]*st-S.gy[k]*ct)*ca+0.16*sa;
+ if(v>0.02)for(let t=0;t<tree.length;t++){const o=tree[t];
+  D[GG+t]=(o.x*st-o.y*ct)*ca+((o.z0+o.z1)*0.5*v)*sa}
+ IDX.sort((a,b)=>D[a]-D[b]);
  const gapEff=S.gap*clamp((78-aDeg)/30,0,1);
- const c0=(G-1)/2,TH=0.16;
- const quietCol=[lerp(LIGHT[0],GRASS_GROUND[0],v),lerp(LIGHT[1],GRASS_GROUND[1],v),lerp(LIGHT[2],GRASS_GROUND[2],v)];
- const items=[];
- for(let k=0;k<G*G;k++){
-  const x=(k%G)-c0,y=c0-((k/G)|0);
-  items.push({g:k,d:-(-x*st+y*ct)*ca+TH*sa})}
- if(v>0.02)for(let t=0;t<S.tree.length;t++){
-  const vo=S.tree[t],z0=vo.z0*v,z1=vo.z1*v,sv=vo.s*(0.35+0.65*v);
-  if(sv<0.03)continue;
-  items.push({t,d:-(-vo.x*st+vo.y*ct)*ca+((z0+z1)/2)*sa,z0,z1,s:sv,c:vo.c,x:vo.x,y:vo.y})}
- items.sort((a,b)=>a.d-b.d);
+ const hs0=gapEff>0.02?(1-gapEff)/2:0.504;
  const visX=Math.abs(st)*ca>0.02?(st>0?1:-1):0;
  const visY=Math.abs(ct)*ca>0.02?(ct<0?1:-1):0;
- const L=[-0.42,-0.48,0.77];
- const shade=(nx,ny,nz)=>{const dt=Math.max(0,nx*L[0]+ny*L[1]+nz*L[2]);return lerp(1,0.42+0.62*dt,S.light)};
- const sT=shade(0,0,1),sX=shade(visX,0,0),sY=shade(0,visY,0);
- const quad=(pts,col)=>{ctx.fillStyle=col;ctx.strokeStyle=col;ctx.lineWidth=1;
-  ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);for(let i=1;i<4;i++)ctx.lineTo(pts[i][0],pts[i][1]);ctx.closePath();ctx.fill();ctx.stroke()};
- const mix=(c,s)=>'rgb('+Math.round(clamp(c[0]*s,0,255))+','+Math.round(clamp(c[1]*s,0,255))+','+Math.round(clamp(c[2]*s,0,255))+')';
- const hs0=(1-gapEff)/2;
- for(const it of items){
-  if(it.g!==undefined){
-   const x=(it.g%G)-c0,y=c0-((it.g/G)|0);
-   const col=S.quiet[it.g]?quietCol:S.ground[it.g];
-   quad([proj(x-hs0,y-hs0,TH),proj(x+hs0,y-hs0,TH),proj(x+hs0,y+hs0,TH),proj(x-hs0,y+hs0,TH)],mix(col,sT));
+ const lod=S.lod;
+ for(let q2=0;q2<total;q2++){
+  const idx=IDX[q2];
+  if(idx<GG){
+   const x=S.gx[idx],y=S.gy[idx],z=0.16;
+   const ua=(x-hs0)*ct+(y-hs0)*st,va=-(x-hs0)*st+(y-hs0)*ct;
+   const ub=(x+hs0)*ct+(y-hs0)*st,vb=-(x+hs0)*st+(y-hs0)*ct;
+   const uc=(x+hs0)*ct+(y+hs0)*st,vc=-(x+hs0)*st+(y+hs0)*ct;
+   const ud=(x-hs0)*ct+(y+hs0)*st,vd=-(x-hs0)*st+(y+hs0)*ct;
+   ctx.fillStyle=S.quiet[idx]?quietStr:gStr[S.gIdx[idx]];
+   ctx.beginPath();
+   ctx.moveTo(cx+ua*zm,cy+(-(va*sa+z*ca)+offY)*zm);
+   ctx.lineTo(cx+ub*zm,cy+(-(vb*sa+z*ca)+offY)*zm);
+   ctx.lineTo(cx+uc*zm,cy+(-(vc*sa+z*ca)+offY)*zm);
+   ctx.lineTo(cx+ud*zm,cy+(-(vd*sa+z*ca)+offY)*zm);
+   ctx.closePath();ctx.fill();
   }else{
-   const hs=it.s/2,x0=it.x,y0=it.y;
-   const xa=x0-hs,xb=x0+hs,ya=y0-hs,yb=y0+hs;
-   if(visX){const xf=visX>0?xb:xa;
-    quad([proj(xf,ya,it.z1),proj(xf,yb,it.z1),proj(xf,yb,it.z0),proj(xf,ya,it.z0)],mix(it.c,sX))}
-   if(visY){const yf=visY>0?yb:ya;
-    quad([proj(xa,yf,it.z1),proj(xb,yf,it.z1),proj(xb,yf,it.z0),proj(xa,yf,it.z0)],mix(it.c,sY))}
-   quad([proj(xa,ya,it.z1),proj(xb,ya,it.z1),proj(xb,yb,it.z1),proj(xa,yb,it.z1)],mix(it.c,sT));
+   if(v<=0.02)continue;
+   const o=tree[idx-GG],sv=o.s*(0.35+0.65*v);
+   if(sv<0.03)continue;
+   const z0=o.z0*v,z1=o.z1*v,hs=sv/2,x=o.x,y=o.y;
+   const ua=(x-hs)*ct+(y-hs)*st,va=-(x-hs)*st+(y-hs)*ct;
+   const ub=(x+hs)*ct+(y-hs)*st,vb=-(x+hs)*st+(y-hs)*ct;
+   const uc=(x+hs)*ct+(y+hs)*st,vc=-(x+hs)*st+(y+hs)*ct;
+   const ud=(x-hs)*ct+(y+hs)*st,vd=-(x-hs)*st+(y+hs)*ct;
+   const pi3=o.pi*3;
+   const sides=(z1-z0)*ca*zm>=0.6;
+   if(lod){
+    /* 1 fill por voxel: techo + caras visibles en un solo trazado */
+    ctx.fillStyle=SH[pi3];
+    ctx.beginPath();
+    ctx.moveTo(cx+ua*zm,cy+(-(va*sa+z1*ca)+offY)*zm);
+    ctx.lineTo(cx+ub*zm,cy+(-(vb*sa+z1*ca)+offY)*zm);
+    ctx.lineTo(cx+uc*zm,cy+(-(vc*sa+z1*ca)+offY)*zm);
+    ctx.lineTo(cx+ud*zm,cy+(-(vd*sa+z1*ca)+offY)*zm);
+    ctx.closePath();
+    if(sides){
+     if(visX){const aU=visX>0?ub:ua,aV=visX>0?vb:va,bU=visX>0?uc:ud,bV=visX>0?vc:vd;
+      ctx.moveTo(cx+aU*zm,cy+(-(aV*sa+z1*ca)+offY)*zm);
+      ctx.lineTo(cx+bU*zm,cy+(-(bV*sa+z1*ca)+offY)*zm);
+      ctx.lineTo(cx+bU*zm,cy+(-(bV*sa+z0*ca)+offY)*zm);
+      ctx.lineTo(cx+aU*zm,cy+(-(aV*sa+z0*ca)+offY)*zm);
+      ctx.closePath()}
+     if(visY){const aU=visY>0?ud:ua,aV=visY>0?vd:va,bU=visY>0?uc:ub,bV=visY>0?vc:vb;
+      ctx.moveTo(cx+aU*zm,cy+(-(aV*sa+z1*ca)+offY)*zm);
+      ctx.lineTo(cx+bU*zm,cy+(-(bV*sa+z1*ca)+offY)*zm);
+      ctx.lineTo(cx+bU*zm,cy+(-(bV*sa+z0*ca)+offY)*zm);
+      ctx.lineTo(cx+aU*zm,cy+(-(aV*sa+z0*ca)+offY)*zm);
+      ctx.closePath()}}
+    ctx.fill();
+   }else{
+    if(sides){
+     if(visX){const aU=visX>0?ub:ua,aV=visX>0?vb:va,bU=visX>0?uc:ud,bV=visX>0?vc:vd;
+      ctx.fillStyle=SH[pi3+1];ctx.beginPath();
+      ctx.moveTo(cx+aU*zm,cy+(-(aV*sa+z1*ca)+offY)*zm);
+      ctx.lineTo(cx+bU*zm,cy+(-(bV*sa+z1*ca)+offY)*zm);
+      ctx.lineTo(cx+bU*zm,cy+(-(bV*sa+z0*ca)+offY)*zm);
+      ctx.lineTo(cx+aU*zm,cy+(-(aV*sa+z0*ca)+offY)*zm);
+      ctx.closePath();ctx.fill()}
+     if(visY){const aU=visY>0?ud:ua,aV=visY>0?vd:va,bU=visY>0?uc:ub,bV=visY>0?vc:vb;
+      ctx.fillStyle=SH[pi3+2];ctx.beginPath();
+      ctx.moveTo(cx+aU*zm,cy+(-(aV*sa+z1*ca)+offY)*zm);
+      ctx.lineTo(cx+bU*zm,cy+(-(bV*sa+z1*ca)+offY)*zm);
+      ctx.lineTo(cx+bU*zm,cy+(-(bV*sa+z0*ca)+offY)*zm);
+      ctx.lineTo(cx+aU*zm,cy+(-(aV*sa+z0*ca)+offY)*zm);
+      ctx.closePath();ctx.fill()}}
+    ctx.fillStyle=SH[pi3];ctx.beginPath();
+    ctx.moveTo(cx+ua*zm,cy+(-(va*sa+z1*ca)+offY)*zm);
+    ctx.lineTo(cx+ub*zm,cy+(-(vb*sa+z1*ca)+offY)*zm);
+    ctx.lineTo(cx+uc*zm,cy+(-(vc*sa+z1*ca)+offY)*zm);
+    ctx.lineTo(cx+ud*zm,cy+(-(vd*sa+z1*ca)+offY)*zm);
+    ctx.closePath();ctx.fill();
+   }
   }
  }
 }
 
-/* ========== QR plano (descarga segura) ========== */
+/* ========== QR plano ========== */
 function flatQRCanvas(px){
  const G=S.G,c=document.createElement('canvas');c.width=c.height=px*G;
  const x=c.getContext('2d');
  x.fillStyle=LIGHT_HEX;x.fillRect(0,0,c.width,c.height);
  const q=S.q,n=S.n;
  const isF=(a,b)=>(a<8&&b<8)||(a>=n-8&&b<8)||(a<8&&b>=n-8);
- for(let j=0;j<n;j++)for(let i=0;i<n;i++)if(S.qr.m[j][i]){
-  x.fillStyle=isF(i,j)?FINDER_HEX:S.qrHex;
-  x.fillRect((q+i)*px,(q+j)*px,px,px)}
+ x.fillStyle=S.qrHex;
+ for(let j=0;j<n;j++)for(let i=0;i<n;i++)if(S.qr.m[j][i]&&!isF(i,j))x.fillRect((q+i)*px,(q+j)*px,px,px);
+ x.fillStyle=FINDER_HEX;
+ for(let j=0;j<n;j++)for(let i=0;i<n;i++)if(S.qr.m[j][i]&&isF(i,j))x.fillRect((q+i)*px,(q+j)*px,px,px);
  return c;
 }
 
-/* ========== vistas / UI ========== */
+/* ========== resolución adaptativa + animación fluida ========== */
 const cv=$('#cv'),box=$('#box');
+let fullT=null;
+function setSize(dpr){const w=box.clientWidth,W=Math.max(2,Math.round(w*dpr));
+ if(cv.width!==W){cv.width=W;cv.height=W}}
+function fullSoon(){clearTimeout(fullT);fullT=setTimeout(()=>{S.lod=false;setSize(S.dprRest);renderMain()},140)}
 function renderMain(){
  renderTo(cv,S.cam);
  const aDeg=S.cam.alpha*180/Math.PI;
  $('#badge').textContent=aDeg>75?'Vista superior · QR escaneable':'Vista frontal · árbol 3D';
 }
-function resize(){const w=box.clientWidth,dpr=Math.min(2,window.devicePixelRatio||1);
- cv.width=Math.max(2,Math.round(w*dpr));cv.height=cv.width;renderMain()}
+function resize(){S.dprRest=Math.min(1.75,window.devicePixelRatio||1);S.dprAnim=Math.min(1,S.dprRest);
+ setSize(S.dprRest);renderMain()}
 function goTo(view,animate=true){
  S.view=view;
- const from={...S.cam};
+ const from={theta:S.cam.theta,alpha:S.cam.alpha,zoom:S.cam.zoom};
  const to=view==='top'?{theta:0,alpha:Math.PI/2,zoom:1}:{theta:S.magic.theta,alpha:S.magic.alpha,zoom:1};
- cancelAnimationFrame(S.anim);
- if(!animate){S.cam=to;renderMain();return}
- const t0=performance.now(),dur=800;
+ cancelAnimationFrame(S.anim);clearTimeout(fullT);
+ if(!animate){S.lod=false;S.cam=to;setSize(S.dprRest);renderMain();return}
+ S.lod=true;                 /* modo ligero durante el movimiento */
+ setSize(S.dprAnim);
+ renderMain();               /* cuadro inmediato: respuesta al instante */
+ const t0=performance.now(),dur=650;
  const step=t=>{const p=clamp((t-t0)/dur,0,1),e=p<.5?4*p*p*p:1-Math.pow(-2*p+2,3)/2;
   S.cam={theta:lerp(from.theta,to.theta,e),alpha:lerp(from.alpha,to.alpha,e),zoom:lerp(from.zoom,to.zoom,e)};
-  renderMain();if(p<1)S.anim=requestAnimationFrame(step)};
+  renderMain();
+  if(p<1)S.anim=requestAnimationFrame(step);
+  else requestAnimationFrame(()=>{S.lod=false;setSize(S.dprRest);renderMain()})};
  S.anim=requestAnimationFrame(step);
 }
 $('#btnSwap').onclick=()=>goTo(S.view==='top'?'3d':'top');
@@ -402,7 +495,8 @@ addEventListener('keydown',e=>{
  if(e.code==='Space'&&!/TEXTAREA|INPUT|SELECT/.test(e.target.tagName)){e.preventDefault();goTo(S.view==='top'?'3d':'top')}});
 let ptrs=new Map(),pinch=0;
 cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,[e.clientX,e.clientY]);
- if(ptrs.size===2){const[p,q]=[...ptrs.values()];pinch=Math.hypot(p[0]-q[0],p[1]-q[1])}});
+ setSize(S.dprAnim);
+ if(ptrs.size===2){const pv=[...ptrs.values()];pinch=Math.hypot(pv[0][0]-pv[1][0],pv[0][1]-pv[1][1])}});
 cv.addEventListener('pointermove',e=>{
  if(!ptrs.has(e.pointerId))return;
  const prev=ptrs.get(e.pointerId);ptrs.set(e.pointerId,[e.clientX,e.clientY]);
@@ -410,11 +504,12 @@ cv.addEventListener('pointermove',e=>{
   S.cam.theta=clamp(S.cam.theta+(e.clientX-prev[0])*0.006,-1.57,1.57);
   S.cam.alpha=clamp(S.cam.alpha-(e.clientY-prev[1])*0.006,0.15,Math.PI/2);
   renderMain()}
- else if(ptrs.size===2){const[p,q]=[...ptrs.values()];const d=Math.hypot(p[0]-q[0],p[1]-q[1]);
+ else if(ptrs.size===2){const pv=[...ptrs.values()];const d=Math.hypot(pv[0][0]-pv[1][0],pv[0][1]-pv[1][1]);
   if(pinch)S.cam.zoom=clamp(S.cam.zoom*d/pinch,0.4,2.5);pinch=d;renderMain()}});
-const endPtr=e=>{ptrs.delete(e.pointerId);if(ptrs.size<2)pinch=0};
+const endPtr=e=>{ptrs.delete(e.pointerId);if(ptrs.size<2)pinch=0;fullSoon()};
 cv.addEventListener('pointerup',endPtr);cv.addEventListener('pointercancel',endPtr);
-cv.addEventListener('wheel',e=>{e.preventDefault();S.cam.zoom=clamp(S.cam.zoom*(e.deltaY>0?0.92:1.08),0.4,2.5);renderMain()},{passive:false});
+cv.addEventListener('wheel',e=>{e.preventDefault();setSize(S.dprAnim);
+ S.cam.zoom=clamp(S.cam.zoom*(e.deltaY>0?0.92:1.08),0.4,2.5);renderMain();fullSoon()},{passive:false});
 
 /* pestañas */
 $('#tabV').onclick=()=>{$('#tabV').classList.add('active');$('#tabC').classList.remove('active');$('#paneV').hidden=false;$('#paneC').hidden=true};
@@ -434,7 +529,7 @@ $('#btnTheme').onclick=()=>setTheme(!document.body.classList.contains('light'));
 function dl(c,name){c.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000)},'image/png')}
 $('#dlTop').onclick=()=>dl(flatQRCanvas(Math.max(20,Math.floor(1600/S.G))),'beper-qr-superior.png');
 $('#dl3d').onclick=()=>{const c=document.createElement('canvas');c.width=c.height=1600;
- renderTo(c,{theta:S.magic.theta,alpha:S.magic.alpha,zoom:1});dl(c,'beper-qr-frontal.png')};
+ const lodPrev=S.lod;S.lod=false;renderTo(c,{theta:S.magic.theta,alpha:S.magic.alpha,zoom:1});S.lod=lodPrev;dl(c,'beper-qr-frontal.png')};
 $('#dlBoth').onclick=()=>{
  const light=document.body.classList.contains('light');
  const W=2000,Hh=1180,c=document.createElement('canvas');c.width=W;c.height=Hh;
@@ -446,7 +541,8 @@ $('#dlBoth').onclick=()=>{
  x.fillText('Vista frontal: el código crece',1040,1100);
  x.drawImage(flatQRCanvas(Math.max(10,Math.floor(900/S.G))),60,140,900,900);
  const t=document.createElement('canvas');t.width=t.height=900;
- renderTo(t,{theta:S.magic.theta,alpha:S.magic.alpha,zoom:1});x.drawImage(t,1040,140,900,900);
+ const lodPrev=S.lod;S.lod=false;renderTo(t,{theta:S.magic.theta,alpha:S.magic.alpha,zoom:1});S.lod=lodPrev;
+ x.drawImage(t,1040,140,900,900);
  x.fillStyle=light?'#8a8072':'#5c6c8c';x.font='24px system-ui';x.fillText('Creado por Beper 2026',60,1150);
  dl(c,'beper-qr-ambas.png')};
 
@@ -462,11 +558,13 @@ $('#txt').addEventListener('input',()=>{clearTimeout(tT);tT=setTimeout(genQR,250
 $('#ecl').addEventListener('change',genQR);
 $('#reroll').onclick=()=>{S.seedOff=(S.seedOff+2654435761)%4294967296;buildTree();renderMain()};
 $('#cLeaf').addEventListener('input',e=>{markSw(null);setLeaf(e.target.value)});
-/* muestras rápidas de color de hojas */
 const SW=['#e76f92','#46a457','#e8842c','#e8b422','#9b6bd3','#c94f2e'];
 SW.forEach(hex=>{const b=document.createElement('button');b.style.background=hex;b.title=hex;
  b.onclick=()=>{$('#cLeaf').value=hex;markSw(b);setLeaf(hex)};$('#sw').appendChild(b)});
 function markSw(btn){[...$('#sw').children].forEach(x=>x.classList.toggle('sel',x===btn))}
+let treePend=false;
+function scheduleTree(){if(treePend)return;treePend=true;
+ requestAnimationFrame(()=>{treePend=false;buildTree();renderMain()})}
 const sliders=[['rEl',v=>{S.magic.alpha=v*Math.PI/180;if(S.view==='3d')S.cam.alpha=S.magic.alpha;$('#vEl').textContent=v+'°'},0],
  ['rAz',v=>{S.magic.theta=v*Math.PI/180;if(S.view==='3d')S.cam.theta=S.magic.theta;$('#vAz').textContent=v+'°'},0],
  ['rG',v=>{S.gap=v/100;$('#vG').textContent=v+'%'},0],
@@ -474,7 +572,7 @@ const sliders=[['rEl',v=>{S.magic.alpha=v*Math.PI/180;if(S.view==='3d')S.cam.alp
  ['rTS',v=>{S.treeScale=v/100;$('#vTS').textContent=v+'%'},1],
  ['rFD',v=>{S.folDens=v/100;$('#vFD').textContent=v+'%'},1]];
 sliders.forEach(([id,fn,tree])=>{const el=$('#'+id);
- const run=()=>{fn(parseFloat(el.value));if(tree)buildTree();renderMain()};
+ const run=()=>{fn(parseFloat(el.value));if(tree)scheduleTree();else renderMain()};
  el.addEventListener('input',run);fn(parseFloat(el.value))});
 
 /* arranque */
